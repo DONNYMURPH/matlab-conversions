@@ -38,7 +38,7 @@ jobs:
       # This avoids failing on protected branches where the Codecov uploader requires a token.
       - name: Upload coverage report to Codecov
         if: ${{ secrets.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           files: ${{ github.workspace }}/coverage.xml
