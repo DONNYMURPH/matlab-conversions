@@ -15,7 +15,7 @@ import argparse
 import sys
 
 from python_template.__about__ import __version__
-from python_template.example import example
+from python_template.gimmeh2m import example
 
 
 def build_parser() -> argparse.ArgumentParser:

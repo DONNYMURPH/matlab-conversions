@@ -1,6 +1,6 @@
 """example pytest module"""
 
-from python_template.example import example
+from python_template.gimmeh2m import example
 
 
 def test_example_passthrough():

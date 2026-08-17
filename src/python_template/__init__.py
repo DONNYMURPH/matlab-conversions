@@ -7,6 +7,6 @@ You should describe your module in this text.
 """
 
 from python_template.__about__ import __version__
-from python_template.example import example
+from python_template.gimmeh2m import example
 
 __all__ = ["__version__", "example"]
