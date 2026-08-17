@@ -3,18 +3,21 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "python-template"
+name = "hist2mri"
 dynamic = ["version"]
-description = ''
+description = "Histology to MRI tissue density mapping: a python port of the lab's MATLAB hist2mri 3.0 pipeline."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
-keywords = []
+keywords = ["histology", "mri", "digital-pathology", "stain-deconvolution"]
 authors = [
-  { name = "barrettMCW", email = "mjbarrett@mcw.edu" },
+  { name = "Donovan Murphy", email = "domurphy@mcw.edu" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Image Processing",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
@@ -24,21 +27,28 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["pyyaml"]
+dependencies = [
+  "numpy>=1.21",
+  "scipy>=1.7",
+  "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.5"]
 
 [project.scripts]
-python-template = "python_template.cli:main"
+hist2mri = "hist2mri.cli:main"
 
 [project.urls]
-Documentation = "https://github.com/LavLabInfrastructure/python-template#readme"
-Issues = "https://github.com/LavLabInfrastructure/python-template/issues"
-Source = "https://github.com/LavLabInfrastructure/python-template"
+Documentation = "https://github.com/LavLabInfrastructure/hist2mri#readme"
+Issues = "https://github.com/LavLabInfrastructure/hist2mri/issues"
+Source = "https://github.com/LavLabInfrastructure/hist2mri"
 
 [tool.hatch.version]
-path = "src/python_template/__about__.py"
+path = "src/hist2mri/__about__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/python_template"]
+packages = ["src/hist2mri"]
 
 [tool.hatch.env]
 requires = [
@@ -79,7 +89,7 @@ dependencies = [
   "mypy>=1.0.0",
 ]
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:src/python_template tests}"
+check = "mypy --install-types --non-interactive {args:src/hist2mri tests}"
 
 [tool.hatch.envs.docs]
 dependencies = [
@@ -99,16 +109,16 @@ serve-docs = "mkdocs serve"
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.coverage.run]
-source_pkgs = ["python_template", "tests"]
+source_pkgs = ["hist2mri", "tests"]
 branch = true
 parallel = true
 omit = [
-  "src/python_template/__about__.py",
+  "src/hist2mri/__about__.py",
 ]
 
 [tool.coverage.paths]
-python_template = ["src/python_template", "*/python-template/src/python_template"]
-tests = ["tests", "*/python-template/tests"]
+hist2mri = ["src/hist2mri", "*/hist2mri/src/hist2mri"]
+tests = ["tests", "*/hist2mri/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -140,10 +150,10 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*" = ["T20"]
-"src/python_template/cli.py" = ["T20"]
+"src/hist2mri/cli.py" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["python_template"]
+known-first-party = ["hist2mri"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -152,3 +162,4 @@ docstring-code-format = true
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
+

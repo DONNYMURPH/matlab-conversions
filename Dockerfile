@@ -36,4 +36,4 @@ RUN pip3 install --no-cache-dir /tmp/*.whl \
     && rm -rf /tmp/*.whl
 USER vscode
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import python_template" || exit 1
+    CMD python -c "import hist2mri" || exit 1

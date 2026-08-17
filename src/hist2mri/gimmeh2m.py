@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026-present Donovan Murphy <domurphy@mcw.edu>
+#
+# SPDX-License-Identifier: MIT
 """
 Welcome to the new gimmeh2m python file.
 This should be as close to a one to one replication of the matlab equivalent.
@@ -9,20 +11,27 @@ gimmeh2m uses the following files.
     -SeparateStains.m
     -normalizeImage.m
 
-I have put all these files and merged them all into this single python file as their own methods.
-I am going to try and comment a lot of what this is doing
+I have put all these files and merged them all into this single python file as
+their own methods. I am going to try and comment a lot of what this is doing
 and compare to the original to help folks unfamiliar with python.
 
-Usage:
-    python hist2mri.py slide.tif
-    python hist2mri.py slide.tif --show --small
-    python hist2mri.py slide.tif --use-pre-segs --outdir results/
-    python hist2mri.py slide.tif --outdir results/ --debug     (prints stats)
+This module is the library half. It has no print statements on purpose --
+progress goes through the logging module so whoever calls it (a script, a
+notebook, another package) decides what actually gets shown. The command line
+wrapper lives in cli.py, and that one is allowed to print.
+
+Usage from python:
+    from hist2mri import gimme_h2m
+    out = gimme_h2m("slide.tif", outdir="results/")
+
+Usage from the shell:
+    hist2mri run slide.tif --outdir results/
+    hist2mri run slide.tif --outdir results/ -vv    (intermediate statistics)
 
 Requires: numpy, scipy, pillow  (matplotlib only for --show)
 """
 
-import argparse
+import logging
 import os
 
 import numpy as np
@@ -30,36 +39,31 @@ from PIL import Image
 from scipy import ndimage
 from scipy.io import loadmat, savemat
 
-# Whole-slides are massive in size and Pillow has a limit that is supposed to stop you
-# from using such big files so there isn't a decompression bomb. But that wont happen with us.
-# so we are turning that off.
+logger = logging.getLogger(__name__)
+
+# Whole-slides are massive in size and Pillow has a limit that is supposed to
+# stop you from using such big files so there isn't a decompression bomb. But
+# that wont happen with us, so we are turning that off.
 Image.MAX_IMAGE_PIXELS = None
 
 
 # 50 is the tile sized used and we need 0.02 of it.
-BLOCK = 50            # blockproc block size
-SCALE = 1.0 / BLOCK   # the 0.02 in the MATLAB source
-
-DEBUG = False         # set by --debug; prints intermediate statistics
+BLOCK = 50  # blockproc block size
+SCALE = 1.0 / BLOCK  # the 0.02 in the MATLAB source
 
 
-def _dbg(msg):
-    if DEBUG:
-        print(f"    [debug] {msg}")
-
-
-# the following are some matlab methods that do not have an exact 1-to-1 that we need to use.
-# python has a mehtod that could do this but does not have the same tie breaking as matlab and bins.
+# The following are some matlab methods that do not have an exact 1-to-1 that
+# we need to use. Python has a method that could do this but does not have the
+# same tie breaking as matlab, and uses different histogram bins.
 def _graythresh(ch):
     """MATLAB graythresh: Otsu's method on a 256-bin histogram.
-    
+
 
     Returns a level in [0, 1].
     """
     counts = np.bincount(ch.ravel(), minlength=256).astype(np.float64)
     p = counts / counts.sum()
 
-    
     omega = np.cumsum(p)
     mu = np.cumsum(p * np.arange(1, 257))
     mu_t = mu[-1]
@@ -79,7 +83,7 @@ def _graythresh(ch):
 
 def _imbinarize(ch):
     """MATLAB imbinarize(I) for a uint8 channel: global Otsu, strictly greater.
-    
+
     every pixel greater than threshold is True, below is False."""
     level = _graythresh(ch)
     return ch.astype(np.float64) / 255.0 > level
@@ -93,14 +97,14 @@ def _stretchlim(ch, tol_low=0.01, tol_high=0.99, nbins=65536):
     is the correct count here. (graythresh above is a different function and
     genuinely does use 256 on the uint8 green channel.)
 
-    We need to find the top 1% brightest pixels and the top 1% 
+    We need to find the top 1% brightest pixels and the top 1%
     darkest pixels so it does not throw off the image.
     """
     counts = np.zeros(nbins, dtype=np.int64)
     flat = ch.reshape(-1)
     step = 1 << 24
     for i in range(0, flat.size, step):
-        idx = np.rint(flat[i:i + step] * (nbins - 1)).astype(np.int32)
+        idx = np.rint(flat[i : i + step] * (nbins - 1)).astype(np.int32)
         np.clip(idx, 0, nbins - 1, out=idx)
         counts += np.bincount(idx, minlength=nbins)
 
@@ -165,6 +169,7 @@ def _imresize(im, size_hw):
     h, w = size_hw
     return np.asarray(Image.fromarray(im).resize((w, h), Image.BICUBIC))
 
+
 # This is the cellcont.m file as a method
 def _cell_count(mask):
     """cellcount.m: bwconncomp with default 8-connectivity, return the count."""
@@ -182,12 +187,15 @@ _RES = np.array([0.63595444, 0.001, 0.7717266])
 
 def _deconv_vector():
     hdab_to_rgb = np.stack(
-        [_HE / np.linalg.norm(_HE),
-         _EO / np.linalg.norm(_EO),
-         _RES / np.linalg.norm(_RES)],
+        [
+            _HE / np.linalg.norm(_HE),
+            _EO / np.linalg.norm(_EO),
+            _RES / np.linalg.norm(_RES),
+        ],
         axis=0,
     )
     return np.linalg.inv(hdab_to_rgb)[:, 0]
+
 
 # Method version fo the NormalizeImage.m file.
 def _normalize_image(ch):
@@ -197,9 +205,11 @@ def _normalize_image(ch):
     stretch.
     """
     lo, hi = ch.min(), ch.max()
-    _dbg(f"raw hematoxylin: min={lo:.6f} max={hi:.6f} range={hi-lo:.6f}")
-    _dbg(f"raw percentiles: 1%={np.percentile(ch, 1):.6f} "
-         f"50%={np.percentile(ch, 50):.6f} 99%={np.percentile(ch, 99):.6f}")
+    logger.debug(f"raw hematoxylin: min={lo:.6f} max={hi:.6f} range={hi - lo:.6f}")
+    logger.debug(
+        f"raw percentiles: 1%={np.percentile(ch, 1):.6f} "
+        f"50%={np.percentile(ch, 50):.6f} 99%={np.percentile(ch, 99):.6f}"
+    )
     if hi <= lo:
         # MATLAB would produce NaN here (0/0). Degenerate input.
         return np.zeros_like(ch)
@@ -207,11 +217,14 @@ def _normalize_image(ch):
     ch = (ch - lo) / (hi - lo)
     ch = 1.0 - ch
     slo, shi = _stretchlim(ch)
-    _dbg(f"stretchlim: low={slo:.6f} high={shi:.6f}")
+    logger.debug(f"stretchlim: low={slo:.6f} high={shi:.6f}")
     out = _imadjust(ch, slo, shi)
-    _dbg(f"post-stretch: mean={out.mean():.6f} "
-         f"frac<=0.3 (becomes nuclei)={float((out <= 0.3).mean()):.4%}")
+    logger.debug(
+        f"post-stretch: mean={out.mean():.6f} "
+        f"frac<=0.3 (becomes nuclei)={float((out <= 0.3).mean()):.4%}"
+    )
     return out
+
 
 # method version of SeperateStains.m file
 def _separate_stains_h(im, chunk_rows=2048):
@@ -226,7 +239,7 @@ def _separate_stains_h(im, chunk_rows=2048):
     for i in range(0, h, chunk_rows):
         j = min(i + chunk_rows, h)
         blk = im[i:j].astype(np.float64)
-        blk += 2.0                    # MATLAB: +2 to avoid log(0)
+        blk += 2.0  # MATLAB: +2 to avoid log(0)
         np.log(blk, out=blk)
         np.negative(blk, out=blk)
         od[i:j] = blk @ w
@@ -234,64 +247,73 @@ def _separate_stains_h(im, chunk_rows=2048):
     return _normalize_image(od)
 
 
-
 # The method version of gimmeSegs.m file.
 
-def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
-    """Segment an RGB slide into ecf / vessel / nuclei / pink uint8 masks.
-    """
-    image = np.array(image, dtype=np.uint8, copy=True)
-    sx, sy = image.shape[:2]
 
-    print("Chopping off black edges")
+def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
+    """Segment an RGB slide into ecf / vessel / nuclei / pink uint8 masks."""
+    image = np.array(image, dtype=np.uint8, copy=True)
+    # MATLAB does `[sx,sy] = size(image); sy = sy/3;` here. That is only needed
+    # because matlab's size() folds the 3 colour channels into the last output
+    # when you ask for fewer outputs than the array has dimensions. numpy's
+    # .shape never does that, so there is nothing to undo and nothing to store.
+
+    logger.info("Chopping off black edges")
     black = (image[..., 0] == 0) & (image[..., 1] == 0) & (image[..., 2] == 0)
     fill = int(image[0, 0, 0])
-    _dbg(f"top-left pixel = {tuple(int(v) for v in image[0, 0])}, fill value = {fill}")
-    _dbg(f"pure-black pixels: {int(black.sum())} ({float(black.mean()):.4%})")
-    if DEBUG:
+    logger.debug(
+        f"top-left pixel = {tuple(int(v) for v in image[0, 0])}, fill value = {fill}"
+    )
+    logger.debug(f"pure-black pixels: {int(black.sum())} ({float(black.mean()):.4%})")
+    if logger.isEnabledFor(logging.DEBUG):
         dark = (image.max(axis=2) <= 10) & ~black
-        _dbg(f"near-black but NOT pure black (max channel <=10): "
-             f"{int(dark.sum())} ({float(dark.mean()):.4%}) -- these are NOT filled")
+        logger.debug(
+            f"near-black but NOT pure black (max channel <=10): "
+            f"{int(dark.sum())} ({float(dark.mean()):.4%}) -- these are NOT filled"
+        )
     image[black] = fill
 
     hue, sat = _rgb_hue_sat(image)
 
-    print("1. Segmenting ECF")
+    logger.info("1. Segmenting ECF")
     # Otsu on the green channel only.
-    if DEBUG:
-        _dbg(f"otsu level (green) = {_graythresh(image[..., 1]):.8f}")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"otsu level (green) = {_graythresh(image[..., 1]):.8f}")
     ecf = _imbinarize(image[..., 1]).astype(np.uint8)
-    _dbg(f"ecf coverage = {float(ecf.mean()):.4%}")
+    logger.debug(f"ecf coverage = {float(ecf.mean()):.4%}")
 
-    print("2. Segmenting Vessels")
+    logger.info("2. Segmenting Vessels")
     vessel = ((hue < 0.1) & (sat > 0.6)).astype(np.uint8)
-    _dbg(f"vessel coverage = {float(vessel.mean()):.6%}")
+    logger.debug(f"vessel coverage = {float(vessel.mean()):.6%}")
     del hue, sat
 
-    print("3. Segmenting Nuclei")
+    logger.info("3. Segmenting Nuclei")
     stain_h = _separate_stains_h(image)
-    nuc3 = (1.0 - stain_h)
+    nuc3 = 1.0 - stain_h
     nuc3 = (nuc3 >= 0.7).astype(np.uint8)
-    _dbg(f"nuclei coverage = {float(nuc3.mean()):.4%}")
-    if DEBUG and black.any():
-        _dbg(f"of the originally-black pixels: "
-             f"{float(nuc3[black].mean()):.2%} classified as nuclei, "
-             f"{float(ecf[black].mean()):.2%} as ecf")
+    logger.debug(f"nuclei coverage = {float(nuc3.mean()):.4%}")
+    if logger.isEnabledFor(logging.DEBUG) and black.any():
+        logger.debug(
+            f"of the originally-black pixels: "
+            f"{float(nuc3[black].mean()):.2%} classified as nuclei, "
+            f"{float(ecf[black].mean()):.2%} as ecf"
+        )
     del stain_h
 
-    print("4. Segmenting Pink")
+    logger.info("4. Segmenting Pink")
     pink = np.clip(
         1 - ecf.astype(np.int16) - vessel.astype(np.int16) - nuc3.astype(np.int16),
-        0, 255,
+        0,
+        255,
     ).astype(np.uint8)
 
-    print("segmentation complete")
+    logger.info("segmentation complete")
 
     if show_me:
         _show_segs(image, ecf, vessel, nuc3, pink)
 
     if save_segs:
-        print("Writing segmentations")
+        logger.info("Writing segmentations")
         # Variable names match the MATLAB save() calls exactly, including
         # nuclei.mat holding a variable called nuc3.
         savemat(os.path.join(outdir, "ecf.mat"), {"ecf": ecf})
@@ -338,14 +360,12 @@ def _block_count(mask, bs=BLOCK):
     return out
 
 
-
 # The main man gimmeh2m.m
-def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False,
-              outdir="."):
+def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False, outdir="."):
     """Port of gimmeH2M. Returns the dict written to h2m.mat."""
     os.makedirs(outdir, exist_ok=True)
 
-    print("Loading image")
+    logger.info("Loading image")
     im = np.asarray(Image.open(slide))
 
     if im.ndim == 2:
@@ -356,20 +376,21 @@ def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False,
 
     if small_yn:
         h, w = im.shape[:2]
-        im = _imresize(im, (int(round(h * 0.5)), int(round(w * 0.5))))
+        im = _imresize(im, (round(h * 0.5), round(w * 0.5)))
 
     if use_pre_segs:
-        print("Loading Segmentations")
+        logger.info("Loading Segmentations")
         ecf = loadmat(os.path.join(outdir, "ecf.mat"))["ecf"]
         vessel = loadmat(os.path.join(outdir, "vessel.mat"))["vessel"]
         nuc = loadmat(os.path.join(outdir, "nuclei.mat"))["nuc3"]
         pink = loadmat(os.path.join(outdir, "pink.mat"))["pink"]
     else:
-        print("Segmenting image:")
-        ecf, vessel, nuc, pink = gimme_segs(im, show_me=False, save_segs=True,
-                                            outdir=outdir)
+        logger.info("Segmenting image:")
+        ecf, vessel, nuc, pink = gimme_segs(
+            im, show_me=False, save_segs=True, outdir=outdir
+        )
 
-    print("Writing to h2m")
+    logger.info("Writing to h2m")
     gh, gw = _grid_shape(*ecf.shape)
     orig_image = _imresize(im, (gh, gw))
 
@@ -380,8 +401,9 @@ def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False,
     count_nuc = _block_count(nuc)
 
     # imgaussfilt(x, 2): 9x9 kernel (2*ceil(2*sigma)+1), replicate padding.
-    smoothnuc = ndimage.gaussian_filter(count_nuc, sigma=2, mode="nearest",
-                                        truncate=2.0)
+    smoothnuc = ndimage.gaussian_filter(
+        count_nuc, sigma=2, mode="nearest", truncate=2.0
+    )
 
     cell_den = np.zeros((gh, gw, 6), dtype=np.float64)
     cell_den[:, :, 0] = ecf_ds
@@ -398,7 +420,7 @@ def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False,
     }
 
     savemat(os.path.join(outdir, "h2m.mat"), {"out": out})
-    print("hist2mri 3.0 complete")
+    logger.info("hist2mri 3.0 complete")
 
     if show_yn:
         _show_h2m(cell_den)
@@ -410,7 +432,7 @@ def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False,
 def _show_segs(image, ecf, vessel, nuc3, pink):
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(1, 5, figsize=(16, 6))
+    _, axes = plt.subplots(1, 5, figsize=(16, 6))
     for ax, data, title in zip(
         axes,
         [image, ecf, vessel, nuc3, pink],
@@ -426,40 +448,11 @@ def _show_segs(image, ecf, vessel, nuc3, pink):
 def _show_h2m(cell_den):
     import matplotlib.pyplot as plt
 
-    titles = ["ECF", "Vessel", "Nuclei", "Pink", "Cell Count",
-              "Smoothed Cell Count"]
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    titles = ["ECF", "Vessel", "Nuclei", "Pink", "Cell Count", "Smoothed Cell Count"]
+    _, axes = plt.subplots(2, 3, figsize=(14, 8))
     for k, (ax, title) in enumerate(zip(axes.ravel(), titles)):
         ax.imshow(cell_den[:, :, k])
         ax.set_title(title)
         ax.set_axis_off()
     plt.tight_layout()
     plt.show()
-
-
-# ---------------------------------------------------------------------------
-
-def main():
-    ap = argparse.ArgumentParser(description="hist2mri 3.0")
-    ap.add_argument("slide", help="path to the slide image")
-    ap.add_argument("--show", action="store_true",
-                    help="display the six density maps (showYn)")
-    ap.add_argument("--small", action="store_true",
-                    help="halve the image before processing (smallYn)")
-    ap.add_argument("--use-pre-segs", action="store_true",
-                    help="reuse saved segmentation .mat files (usePreSegs)")
-    ap.add_argument("--outdir", default=".",
-                    help="where the .mat files are written (default: cwd)")
-    ap.add_argument("--debug", action="store_true",
-                    help="print intermediate statistics")
-    args = ap.parse_args()
-
-    global DEBUG
-    DEBUG = args.debug
-
-    gimme_h2m(args.slide, show_yn=args.show, small_yn=args.small,
-              use_pre_segs=args.use_pre_segs, outdir=args.outdir)
-
-
-if __name__ == "__main__":
-    main()

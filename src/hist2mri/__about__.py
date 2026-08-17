@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2024-present barrettMCW <mjbarrett@mcw.edu>
+# SPDX-FileCopyrightText: 2026-present Donovan Murphy <domurphy@mcw.edu>
 #
 # SPDX-License-Identifier: MIT
-"""Version information for python_template."""
+"""Version information for hist2mri."""
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"

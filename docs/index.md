@@ -1,36 +1,124 @@
-# Python Template
+# hist2mri
 
-Welcome to the **python-template** documentation.
+Histology to MRI tissue density mapping. A python port of the lab's MATLAB
+`hist2mri 3.0` pipeline.
 
 ## Overview
 
-This is a Python project template providing a consistent, feature-rich starting point for new Python packages. It includes:
+A pathologist scans a stained slice of tissue and you get a gigapixel image
+where individual cells are visible. The same patient's MRI is very low
+resolution -- one voxel covers thousands of cells. This pipeline bridges the
+two: it reduces the huge microscope image into six coarse density maps at 1/50
+scale, so you can ask what the tissue actually looks like inside one MRI voxel.
 
-- **[Hatch](https://hatch.pypa.io/)** for build and environment management
-- **[Ruff](https://docs.astral.sh/ruff/)** for linting and formatting
-- **[pytest](https://docs.pytest.org/)** with coverage reporting
-- **[mypy](https://mypy.readthedocs.io/)** for static type checking
-- **[MkDocs](https://www.mkdocs.org/)** with Material theme for documentation
-- **[Docker](https://www.docker.com/)** multi-stage builds (dev, hatch, prod)
-- **[pre-commit](https://pre-commit.com/)** hooks for consistent commits
-- **GitHub Actions** CI/CD workflows
-- **Dev Container** support for VS Code / GitHub Codespaces
+**Input:** one slide image.
+
+**Output:** `h2m.mat` holding a thumbnail plus a `rows x cols x 6` stack, where
+every value summarises one 50x50 pixel tile of the slide.
+
+| Layer | Name | What it counts |
+|-------|------|----------------|
+| 1 | ECF | empty space / extracellular fluid pixels |
+| 2 | Vessel | blood vessel pixels |
+| 3 | Nuclei | nuclei pixels (area) |
+| 4 | Pink | cytoplasm / connective tissue pixels |
+| 5 | Cell Count | separate nuclei (count, not area) |
+| 6 | Smoothed Cell Count | layer 5, gaussian smoothed |
+
+Layer 5 is the only one counting *objects* rather than pixels. A tile with a
+few large nuclei and a tile with many small ones can have identical pixel area
+but very different cell counts.
 
 ## Quick Start
 
 ### Installation
 
 ```console
-pip install python-template
+pip install hist2mri
 ```
 
-### Development Setup
+Add the plotting extra if you want `--show`:
+
+```console
+pip install "hist2mri[viz]"
+```
+
+### From the shell
+
+```console
+hist2mri run slide.tif --outdir results/
+hist2mri run slide.tif --outdir results/ -vv     # intermediate statistics
+hist2mri run slide.tif --outdir results/ --show  # needs [viz]
+```
+
+### From python
+
+```python
+from hist2mri import gimme_h2m
+
+out = gimme_h2m("slide.tif", outdir="results/")
+nuclei_density = out["cell_den"][:, :, 2]
+cell_counts = out["cell_den"][:, :, 4]
+```
+
+Progress goes through `logging`, so whoever calls the library decides what gets
+shown:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.INFO)  # stage messages
+logging.basicConfig(level=logging.DEBUG)  # plus thresholds and coverages
+```
+
+## Which MATLAB file is where
+
+Five MATLAB files were merged into `gimmeh2m.py`, each as its own function.
+
+| MATLAB | Python |
+|--------|--------|
+| `gimmeH2M.m` | `gimme_h2m()` |
+| `gimmeSegs.m` | `gimme_segs()` |
+| `cellcount.m` | `_cell_count()` |
+| `SeparateStains.m` | `_separate_stains_h()` |
+| `normalizeImage.m` | `_normalize_image()` |
+
+Plus helpers reimplementing MATLAB Image Processing Toolbox built-ins that have
+no faithful python equivalent: `_graythresh`, `_imbinarize`, `_stretchlim`,
+`_imadjust`, `_rgb_hue_sat`, `_imresize`. Most of the porting difficulty lived
+in those, not in the lab's own code.
+
+## Fidelity
+
+Validated against MATLAB on 4000x4000 crops from five slides:
+
+| Layer | Result |
+|-------|--------|
+| ECF | 0 of 16,000,000 pixels differ |
+| Nuclei | 0 of 16,000,000 pixels differ |
+| Cell count | identical, max block difference 0 |
+| Smoothed count | agrees to ~1e-14 (float64 rounding) |
+| Vessel | 3 pixels on one slide |
+
+Those 3 pixels all have saturation of exactly 0.6, where the vessel rule tests
+`> 0.6` and the last bit of a float64 division rounds differently in MATLAB
+than in numpy. The two disagree in *both* directions, so neither is more
+correct, and all three are near-black background rather than real vessels.
+
+## Memory
+
+The deconvolution is chunked and only the hematoxylin channel is computed, so a
+594-megapixel slide runs in roughly 16 GB. The MATLAB original builds the whole
+float64 array at once and needs about 40 GB, which is why it runs out of memory
+on full-resolution slides where this does not.
+
+## Development
 
 Clone the repository and install [Hatch](https://hatch.pypa.io/latest/install/):
 
 ```console
-git clone https://github.com/LavLabInfrastructure/python-template.git
-cd python-template
+git clone https://github.com/LavLabInfrastructure/hist2mri.git
+cd hist2mri
 pip install hatch
 ```
 
@@ -48,48 +136,30 @@ pip install hatch
 | Serve docs locally | `hatch run docs:serve-docs` |
 | Build wheel | `hatch build` |
 
-### CLI Usage
-
-The template includes a CLI entry point pattern:
-
-```console
-python-template --version
-python-template example "hello world"
-```
-
-## Project Structure
+### Project Structure
 
 ```text
-python-template/
+hist2mri/
 ├── src/
-│   └── python_template/      # Package source code
-│       ├── __init__.py        # Public API exports
-│       ├── __about__.py       # Version info
-│       ├── cli.py             # CLI entry point (wraps library functions)
-│       ├── example.py         # Example library module
+│   └── hist2mri/
+│       ├── __init__.py        # public API
+│       ├── __about__.py       # version
+│       ├── cli.py             # command line wrapper
+│       ├── gimmeh2m.py        # the pipeline (all five MATLAB files)
 │       └── py.typed           # PEP 561 type marker
-├── tests/                     # Test suite
-│   ├── conftest.py            # Shared fixtures
-│   └── test_example.py        # Example tests
-├── docs/                      # Documentation source
-├── requirements/              # Locked dependency files (auto-generated)
-├── .devcontainer/             # Dev container configuration
-├── .github/                   # GitHub Actions & Dependabot
-├── pyproject.toml             # Project metadata & tool config
-├── Dockerfile                 # Multi-stage Docker build
-├── Makefile                   # Common task shortcuts
-├── mkdocs.yml                 # Documentation config
-└── .pre-commit-config.yaml    # Pre-commit hooks
+├── tests/
+│   ├── conftest.py            # synthetic slide fixtures
+│   ├── test_matlab_compat.py  # the MATLAB built-in reimplementations
+│   ├── test_blocks.py         # blockproc replacements
+│   ├── test_gimmeh2m.py       # segmentation + end to end
+│   └── test_cli.py
+├── docs/
+├── pyproject.toml
+├── Dockerfile
+├── Makefile
+└── mkdocs.yml
 ```
-
-## Design Philosophy
-
-This template follows a **library-first** approach:
-
-1. All business logic lives in library modules under `src/python_template/`
-2. The CLI (`cli.py`) is a thin wrapper that parses arguments and delegates to library functions
-3. This makes the code importable, testable, and reusable — whether invoked from the command line, another Python package, or a notebook
 
 ## API Reference
 
-::: python_template
+::: hist2mri

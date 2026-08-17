@@ -2,18 +2,18 @@
 
 ## Package
 
-::: python_template
+::: hist2mri
 
-## Example Module
+## Pipeline
 
-::: python_template.example
+::: hist2mri.gimmeh2m
     options:
       show_source: true
       heading_level: 3
 
 ## CLI
 
-::: python_template.cli
+::: hist2mri.cli
     options:
       show_source: false
       heading_level: 3

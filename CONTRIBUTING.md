@@ -7,8 +7,8 @@ Thank you for your interest in contributing! This document provides guidelines f
 1. **Clone the repository:**
 
    ```console
-   git clone https://github.com/LavLabInfrastructure/python-template.git
-   cd python-template
+   git clone https://github.com/LavLabInfrastructure/hist2mri.git
+   cd hist2mri
    ```
 
 2. **Install Hatch** (build & environment manager):
@@ -52,8 +52,8 @@ All project tasks are managed through [Hatch environments](https://hatch.pypa.io
 
 This project follows a **library-first** design:
 
-1. **Library modules** (`src/python_template/`) contain all business logic as importable functions and classes.
-2. **CLI** (`src/python_template/cli.py`) is a thin wrapper that parses arguments and delegates to library functions.
+1. **Library modules** (`src/hist2mri/`) contain all business logic as importable functions and classes.
+2. **CLI** (`src/hist2mri/cli.py`) is a thin wrapper that parses arguments and delegates to library functions.
 3. **Tests** (`tests/`) import directly from the library — never from the CLI.
 
 When adding new functionality:

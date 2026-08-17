@@ -1,4 +1,4 @@
-site_name: Python Template
+site_name: hist2mri
 theme:
   name: material
   palette:

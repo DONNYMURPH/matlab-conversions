@@ -1,152 +1,119 @@
-# Python Template
+# hist2mri
 
-[![Build](https://github.com/LavLabInfrastructure/python-template/actions/workflows/build.yml/badge.svg)](https://github.com/LavLabInfrastructure/python-template/actions/workflows/build.yml)
-[![Tests](https://github.com/LavLabInfrastructure/python-template/actions/workflows/pytest.yml/badge.svg)](https://github.com/LavLabInfrastructure/python-template/actions/workflows/pytest.yml)
-[![Lint](https://github.com/LavLabInfrastructure/python-template/actions/workflows/pylint.yml/badge.svg)](https://github.com/LavLabInfrastructure/python-template/actions/workflows/pylint.yml)
-[![PyPI - Version](https://img.shields.io/pypi/v/python-template.svg)](https://pypi.org/project/python-template)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/python-template.svg)](https://pypi.org/project/python-template)
+Histology to MRI tissue density mapping. A python port of the lab's MATLAB
+gimmeh2m.
 
------
+## What it does
 
-A consistent, feature-rich template for Python projects. Use this as a starting point for new packages to get batteries-included tooling out of the box.
+A pathologist scans a stained slice of tissue and you get a gigapixel image
+where individual cells are visible. The same patient's MRI is very low
+resolution -- one voxel covers thousands of cells. This pipeline bridges the
+two: it reduces the huge microscope image to six coarse density maps at 1/50
+scale, so you can ask what the tissue actually looks like inside one MRI voxel.
 
-## What's Included
+**Input:** one slide image.
+**Output:** `h2m.mat` holding a thumbnail plus a `rows x cols x 6` stack, where
+every value summarises one 50x50 pixel tile of the slide.
 
-| Feature | Tool |
-|---------|------|
-| Build & environments | [Hatch](https://hatch.pypa.io/) with [hatch-pip-compile](https://github.com/juftin/hatch-pip-compile) |
-| Linting & formatting | [Ruff](https://docs.astral.sh/ruff/) |
-| Testing | [pytest](https://docs.pytest.org/) + [coverage](https://coverage.readthedocs.io/) |
-| Type checking | [mypy](https://mypy.readthedocs.io/) |
-| Documentation | [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) + [mkdocstrings](https://mkdocstrings.github.io/) |
-| Containerization | Multi-stage [Dockerfile](./Dockerfile) (dev / hatch / prod) |
-| CI/CD | [GitHub Actions](./.github/workflows/) with Dependabot |
-| Dev environment | [Dev Container](./.devcontainer/) for VS Code / Codespaces |
-| Git hygiene | [pre-commit](./.pre-commit-config.yaml) hooks |
+| Layer | Name | What it counts |
+|-------|------|----------------|
+| 1 | ECF | empty space / extracellular fluid pixels |
+| 2 | Vessel | blood vessel pixels |
+| 3 | Nuclei | nuclei pixels (area) |
+| 4 | Pink | cytoplasm / connective tissue pixels |
+| 5 | Cell Count | separate nuclei (count, not area) |
+| 6 | Smoothed Cell Count | layer 5, gaussian smoothed |
 
-## Quick Start
-
-### Installation
+## Install
 
 ```console
-pip install python-template
+pip install hist2mri
 ```
 
-### CLI
-
-The template ships with an example CLI entry point:
+Add the plotting extra if you want `--show`:
 
 ```console
-python-template --version
-python-template example "hello world"
+pip install "hist2mri[viz]"
 ```
 
-### As a Library
+## Use
+
+From the shell:
+
+```console
+hist2mri run slide.tif --outdir results/
+hist2mri run slide.tif --outdir results/ -vv     # intermediate statistics
+hist2mri run slide.tif --outdir results/ --show  # needs [viz]
+```
+
+From python:
 
 ```python
-from python_template import example
+from hist2mri import gimme_h2m
 
-result = example("hello")
+out = gimme_h2m("slide.tif", outdir="results/")
+nuclei_density = out["cell_den"][:, :, 2]
+cell_counts = out["cell_den"][:, :, 4]
 ```
 
-## Development Setup
+Progress goes through `logging`, so a caller decides what gets shown:
 
-**Prerequisites:** Python 3.9+ and [Hatch](https://hatch.pypa.io/latest/install/).
+```python
+import logging
+
+logging.basicConfig(level=logging.INFO)   # stage messages
+logging.basicConfig(level=logging.DEBUG)  # plus thresholds and coverages
+```
+
+## Which MATLAB file is where
+
+Five MATLAB files were merged into `gimmeh2m.py`, each as its own function.
+
+| MATLAB | Python |
+|--------|--------|
+| `gimmeH2M.m` | `gimme_h2m()` |
+| `gimmeSegs.m` | `gimme_segs()` |
+| `cellcount.m` | `_cell_count()` |
+| `SeparateStains.m` | `_separate_stains_h()` |
+| `normalizeImage.m` | `_normalize_image()` |
+
+Plus a handful of helpers that reimplement MATLAB Image Processing Toolbox
+built-ins with no faithful python equivalent: `_graythresh`, `_imbinarize`,
+`_stretchlim`, `_imadjust`, `_rgb_hue_sat`, `_imresize`.
+
+## Fidelity
+
+Validated against MATLAB on 4000x4000 crops from five slides:
+
+| Layer | Result |
+|-------|--------|
+| ECF | 0 of 16,000,000 pixels differ |
+| Nuclei | 0 of 16,000,000 pixels differ |
+| Cell count | identical, max block difference 0 |
+| Smoothed count | agrees to ~1e-14 (float64 rounding) |
+| Vessel | 3 pixels on one slide |
+
+Those 3 pixels all have saturation of exactly 0.6, where the vessel rule tests
+`> 0.6` and the last bit of a float64 division rounds differently in MATLAB
+than in numpy. The two disagree in *both* directions, so neither is more
+correct, and all three are near-black background rather than real vessels.
+
+## Memory
+
+The deconvolution is chunked and only the hematoxylin channel is computed, so a
+594-megapixel slide runs in roughly 16 GB. The MATLAB original builds the whole
+float64 array at once and needs about 40 GB, which is why it runs out of memory
+on full-resolution slides where this does not.
+
+## Development
 
 ```console
-git clone https://github.com/LavLabInfrastructure/python-template.git
-cd python-template
 pip install hatch
+hatch run test:test      # tests
+hatch run test:cov       # tests with coverage
+hatch run lint:check     # ruff
+hatch run lint:all       # format + autofix + check
+hatch run types:check    # mypy
+hatch run docs:serve-docs
+hatch build
 ```
-
-Optionally install pre-commit hooks:
-
-```console
-pip install pre-commit
-pre-commit install
-```
-
-### Common Commands
-
-Run these directly or use the provided [`Makefile`](./Makefile) shortcuts (e.g. `make test`, `make lint`).
-
-| Task | Command |
-|------|---------|
-| Run tests | `hatch run test:test` |
-| Tests + coverage | `hatch run test:cov` |
-| Lint | `hatch run lint:check` |
-| Format | `hatch run lint:format` |
-| Auto-fix lint | `hatch run lint:fix` |
-| Format + fix + lint | `hatch run lint:all` |
-| Type check | `hatch run types:check` |
-| Build docs | `hatch run docs:build-docs` |
-| Serve docs | `hatch run docs:serve-docs` |
-| Build wheel | `hatch build` |
-| Clean artifacts | `make clean` |
-
-### Docker
-
-```console
-# Run tests via Docker
-docker build --target hatch -t myapp:hatch .
-docker run --rm -e HATCH_ENV=test myapp:hatch cov
-
-# Production image (just the installed wheel)
-docker build --target prod -t myapp:prod .
-```
-
-## Project Structure
-
-```text
-python-template/
-├── src/
-│   └── python_template/        # Package source
-│       ├── __init__.py          # Public API & version export
-│       ├── __about__.py         # Version string
-│       ├── cli.py               # CLI entry point (thin wrapper)
-│       ├── example.py           # Example library module
-│       └── py.typed             # PEP 561 marker
-├── tests/
-│   ├── conftest.py              # Shared pytest fixtures
-│   └── test_example.py          # Example tests
-├── docs/                        # MkDocs source files
-├── requirements/                # Locked deps (auto-generated by hatch-pip-compile)
-├── .devcontainer/               # Dev container config
-├── .github/
-│   ├── workflows/               # CI workflows (build, test, lint)
-│   └── dependabot.yml           # Auto-update deps + actions + Docker
-├── pyproject.toml               # All project & tool configuration
-├── Dockerfile                   # Multi-stage build
-├── Makefile                     # Dev shortcuts
-├── mkdocs.yml                   # Docs config
-├── .pre-commit-config.yaml      # Pre-commit hooks
-├── .editorconfig                # Editor consistency
-└── .gitignore
-```
-
-## Design Philosophy
-
-This template follows a **library-first** approach:
-
-1. **All logic** lives in importable modules under `src/python_template/`.
-2. **The CLI** (`cli.py`) is a thin `argparse` wrapper that delegates to library functions.
-3. **Tests** call library functions directly — never through the CLI.
-
-This keeps your code reusable whether it's called from the command line, another package, a notebook, or an API.
-
-## Using This Template
-
-1. Click **Use this template** on GitHub (or clone and reinitialize).
-2. Rename `src/python_template/` to your package name.
-3. Find-and-replace `python-template` → your project name and `python_template` → your package name.
-4. Update `pyproject.toml` with your metadata (author, description, dependencies).
-5. Update `LICENSE.txt` if needed.
-6. Delete `example.py` and `test_example.py` once you have real code.
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines.
-
-## License
-
-`python-template` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
