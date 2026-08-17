@@ -67,9 +67,9 @@ platformdirs==4.2.0 \
     # via
     #   black
     #   pylint
-pylint==3.1.0 \
-    --hash=sha256:507a5b60953874766d8a366e8e8c7af63e058b26345cfcb5f91f89d987fd6b74 \
-    --hash=sha256:6a69beb4a6f63debebaab0a3477ecd0f559aa726af4954fc948c51f7a2549e23
+pylint==4.0.7 \
+    --hash=sha256:9b2d1d15791c84b77a4fe2aafe8f0d9570717e2dea06d53b19c105cf60275a52 \
+    --hash=sha256:be4a3111557a614411ed1fc89347ce4a8e1013a59e1f33d11485227a02e3304d
     # via hatch.envs.lint
 tomli==2.0.1 \
     --hash=sha256:939de3e7a6161af0c887ef91b7d41a53e7c5a1ca976325f429cb46ea9bc30ecc \
