@@ -41,6 +41,31 @@ from scipy.io import loadmat, savemat
 
 logger = logging.getLogger(__name__)
 
+
+def _peak_gb():
+    """Peak resident memory so far, in GB, or None if unavailable.
+
+    Only used for debug logging. resource.getrusage reports kilobytes on
+    Linux and bytes on macOS, hence the platform check.
+    """
+    try:
+        import resource
+        import sys as _sys
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return peak / 1024**3 if _sys.platform == "darwin" else peak / 1024**2
+    except Exception:
+        return None
+
+
+def _log_peak(stage):
+    """Log peak memory after a stage, so a crash points at the culprit."""
+    if logger.isEnabledFor(logging.DEBUG):
+        gb = _peak_gb()
+        if gb is not None:
+            logger.debug(f"    peak memory after {stage}: {gb:.2f} GB")
+
+
 # Whole-slides are massive in size and Pillow has a limit that is supposed to
 # stop you from using such big files so there isn't a decompression bomb. But
 # that wont happen with us, so we are turning that off.
@@ -50,6 +75,11 @@ Image.MAX_IMAGE_PIXELS = None
 # 50 is the tile sized used and we need 0.02 of it.
 BLOCK = 50  # blockproc block size
 SCALE = 1.0 / BLOCK  # the 0.02 in the MATLAB source
+
+# The old DEBUG flag and _dbg() helper are gone. What used to print only
+# under --debug is now logger.debug(); the stage announcements are
+# logger.info(). Switch them on with `hist2mri run -vv`, or in python with
+#     import logging; logging.basicConfig(level=logging.DEBUG)
 
 
 # The following are some matlab methods that do not have an exact 1-to-1 that
@@ -86,6 +116,8 @@ def _imbinarize(ch):
 
     every pixel greater than threshold is True, below is False."""
     level = _graythresh(ch)
+    # Done in row chunks: ch.astype(np.float64) on a whole slide is a 4.75 GB
+    # temporary. Same comparison, same answer, a fraction of the memory.
     out = np.zeros(ch.shape, dtype=bool)
     for i in range(0, ch.shape[0], 2048):
         j = min(i + 2048, ch.shape[0])
@@ -129,6 +161,7 @@ def _imadjust(ch, low, high):
     """
     if high <= low:
         return ch.copy()
+    # In place, for the same reason as _normalize_image.
     ch -= low
     ch /= high - low
     return np.clip(ch, 0.0, 1.0, out=ch)
@@ -171,6 +204,10 @@ def _vessel_mask(im, hue_max=0.1, sat_min=0.6, chunk_rows=2048):
     Exactly `(hue < 0.1) & (sat > 0.6)` on the output of _rgb_hue_sat: same
     operations in the same order, so the same float64 rounding and the same
     mask to the bit. It just never holds the full hue and saturation arrays.
+
+    On a 594 megapixel slide the direct version needs roughly 38 GB -- the RGB
+    float64 conversion alone is 14 GB, and v/mn/d/s/h are 4.75 GB each. This
+    stays under a gigabyte.
     """
     h, w = im.shape[:2]
     out = np.zeros((h, w), dtype=np.uint8)
@@ -228,9 +265,17 @@ def _normalize_image(ch):
     """
     lo, hi = ch.min(), ch.max()
     logger.debug(f"raw hematoxylin: min={lo:.6f} max={hi:.6f} range={hi - lo:.6f}")
+    # np.percentile is deliberately not called here: it copies and
+    # partitions the whole array, another 4.75 GB on a full slide, and it
+    # ran twice -- which made -vv the thing that pushed a big slide over.
     if hi <= lo:
         # MATLAB would produce NaN here (0/0). Degenerate input.
         return np.zeros_like(ch)
+
+    # In place. The arithmetic is identical to
+    #     ch = (ch - lo) / (hi - lo); ch = 1.0 - ch
+    # but without allocating a fresh full size array at each step, which on a
+    # full slide is 4.75 GB apiece.
     ch -= lo
     ch /= hi - lo
     np.subtract(1.0, ch, out=ch)
@@ -297,16 +342,22 @@ def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
         logger.debug(f"otsu level (green) = {_graythresh(image[..., 1]):.8f}")
     ecf = _imbinarize(image[..., 1]).astype(np.uint8)
     logger.debug(f"ecf coverage = {float(ecf.mean()):.4%}")
+    _log_peak("ecf")
 
     logger.info("2. Segmenting Vessels")
     vessel = _vessel_mask(image)
     logger.debug(f"vessel coverage = {float(vessel.mean()):.6%}")
+    _log_peak("vessel")
 
     logger.info("3. Segmenting Nuclei")
     stain_h = _separate_stains_h(image)
-    nuc3 = 1.0 - stain_h
-    nuc3 = (nuc3 >= 0.7).astype(np.uint8)
+    # MATLAB's imcomplement, in place. Writing `nuc3 = 1.0 - stain_h` would
+    # allocate a second full size float64 array (4.75 GB on a full slide)
+    # purely to hold a value we immediately threshold away.
+    np.subtract(1.0, stain_h, out=stain_h)
+    nuc3 = (stain_h >= 0.7).astype(np.uint8)
     logger.debug(f"nuclei coverage = {float(nuc3.mean()):.4%}")
+    _log_peak("nuclei")
     if logger.isEnabledFor(logging.DEBUG) and black.any():
         logger.debug(
             f"of the originally-black pixels: "
@@ -322,6 +373,7 @@ def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
         255,
     ).astype(np.uint8)
 
+    _log_peak("pink")
     logger.info("segmentation complete")
 
     if show_me:
@@ -351,9 +403,16 @@ def _block_sum(mask, bs=BLOCK):
     """
     h, w = mask.shape
     gh, gw = _grid_shape(h, w, bs)
-    padded = np.zeros((gh * bs, gw * bs), dtype=np.int64)
+    # uint8 pad buffer, not int64. The mask is 0/1, so only the accumulator
+    # needs to be wide -- and at full slide size an int64 buffer here is
+    # 4.77 GB, allocated four times over.
+    padded = np.zeros((gh * bs, gw * bs), dtype=np.uint8)
     padded[:h, :w] = mask
-    return padded.reshape(gh, bs, gw, bs).sum(axis=(1, 3)).astype(np.float64)
+    return (
+        padded.reshape(gh, bs, gw, bs)
+        .sum(axis=(1, 3), dtype=np.int64)
+        .astype(np.float64)
+    )
 
 
 def _block_count(mask, bs=BLOCK):
@@ -435,6 +494,7 @@ def gimme_h2m(slide, show_yn=False, small_yn=False, use_pre_segs=False, outdir="
     }
 
     savemat(os.path.join(outdir, "h2m.mat"), {"out": out})
+    _log_peak("block reduction")
     logger.info("hist2mri 3.0 complete")
 
     if show_yn:
