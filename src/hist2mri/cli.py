@@ -30,9 +30,16 @@ def _configure_logging(verbosity: int) -> None:
         level = logging.INFO
     elif verbosity >= 2:
         level = logging.DEBUG
+
+    # Configure the handler, but leave the ROOT logger at WARNING. Setting the
+    # root level to DEBUG would switch on debug output for every library in the
+    # process -- Pillow's TIFF plugin in particular dumps every tag in the file
+    # before the pipeline even starts. The handler itself has no level, so it
+    # passes through whatever our own logger decides to emit.
     logging.basicConfig(
-        level=level, format="%(message)s", stream=sys.stderr, force=True
+        level=logging.WARNING, format="%(message)s", stream=sys.stderr, force=True
     )
+    logging.getLogger("hist2mri").setLevel(level)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="hist2mri",
-        description="Histology to MRI tissue density mapping.",
+        description="Histology to MRI tissue density mapping (hist2mri 3.0).",
     )
     parser.add_argument(
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"

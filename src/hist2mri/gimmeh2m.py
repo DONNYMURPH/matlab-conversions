@@ -86,7 +86,11 @@ def _imbinarize(ch):
 
     every pixel greater than threshold is True, below is False."""
     level = _graythresh(ch)
-    return ch.astype(np.float64) / 255.0 > level
+    out = np.zeros(ch.shape, dtype=bool)
+    for i in range(0, ch.shape[0], 2048):
+        j = min(i + 2048, ch.shape[0])
+        np.greater(ch[i:j].astype(np.float64) / 255.0, level, out=out[i:j])
+    return out
 
 
 def _stretchlim(ch, tol_low=0.01, tol_high=0.99, nbins=65536):
@@ -125,7 +129,9 @@ def _imadjust(ch, low, high):
     """
     if high <= low:
         return ch.copy()
-    return np.clip((ch - low) / (high - low), 0.0, 1.0)
+    ch -= low
+    ch /= high - low
+    return np.clip(ch, 0.0, 1.0, out=ch)
 
 
 def _rgb_hue_sat(im):
@@ -157,6 +163,22 @@ def _rgb_hue_sat(im):
     h[is_b] = (r[is_b] - g[is_b]) / d[is_b] + 4.0
 
     return h / 6.0, s
+
+
+def _vessel_mask(im, hue_max=0.1, sat_min=0.6, chunk_rows=2048):
+    """The vessel rule, computed a few thousand rows at a time.
+
+    Exactly `(hue < 0.1) & (sat > 0.6)` on the output of _rgb_hue_sat: same
+    operations in the same order, so the same float64 rounding and the same
+    mask to the bit. It just never holds the full hue and saturation arrays.
+    """
+    h, w = im.shape[:2]
+    out = np.zeros((h, w), dtype=np.uint8)
+    for i in range(0, h, chunk_rows):
+        j = min(i + chunk_rows, h)
+        hue, sat = _rgb_hue_sat(im[i:j])
+        out[i:j] = (hue < hue_max) & (sat > sat_min)
+    return out
 
 
 def _imresize(im, size_hw):
@@ -206,16 +228,12 @@ def _normalize_image(ch):
     """
     lo, hi = ch.min(), ch.max()
     logger.debug(f"raw hematoxylin: min={lo:.6f} max={hi:.6f} range={hi - lo:.6f}")
-    logger.debug(
-        f"raw percentiles: 1%={np.percentile(ch, 1):.6f} "
-        f"50%={np.percentile(ch, 50):.6f} 99%={np.percentile(ch, 99):.6f}"
-    )
     if hi <= lo:
         # MATLAB would produce NaN here (0/0). Degenerate input.
         return np.zeros_like(ch)
-
-    ch = (ch - lo) / (hi - lo)
-    ch = 1.0 - ch
+    ch -= lo
+    ch /= hi - lo
+    np.subtract(1.0, ch, out=ch)
     slo, shi = _stretchlim(ch)
     logger.debug(f"stretchlim: low={slo:.6f} high={shi:.6f}")
     out = _imadjust(ch, slo, shi)
@@ -273,8 +291,6 @@ def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
         )
     image[black] = fill
 
-    hue, sat = _rgb_hue_sat(image)
-
     logger.info("1. Segmenting ECF")
     # Otsu on the green channel only.
     if logger.isEnabledFor(logging.DEBUG):
@@ -283,9 +299,8 @@ def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
     logger.debug(f"ecf coverage = {float(ecf.mean()):.4%}")
 
     logger.info("2. Segmenting Vessels")
-    vessel = ((hue < 0.1) & (sat > 0.6)).astype(np.uint8)
+    vessel = _vessel_mask(image)
     logger.debug(f"vessel coverage = {float(vessel.mean()):.6%}")
-    del hue, sat
 
     logger.info("3. Segmenting Nuclei")
     stain_h = _separate_stains_h(image)
