@@ -387,8 +387,7 @@ def _block_sum(mask, bs=BLOCK):
 
 
 def _block_count(mask, bs=BLOCK):
-    """blockproc(mask, [50 50], countify).
-    """
+    """blockproc(mask, [50 50], countify)."""
     h, w = mask.shape
     gh, gw = _grid_shape(h, w, bs)
     out = np.zeros((gh, gw), dtype=np.float64)
