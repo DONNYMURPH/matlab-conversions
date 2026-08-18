@@ -1,7 +1,7 @@
 # hist2mri
 
 Histology to MRI tissue density mapping. A python port of the lab's MATLAB
-`hist2mri 3.0` pipeline.
+gimmeh2m file.
 
 ## Overview
 
@@ -34,13 +34,15 @@ but very different cell counts.
 ### Installation
 
 ```console
-pip install hist2mri
+git clone https://github.com/DONNYMURPH/matlab-conversions.git
+cd matlab-conversions
+pip install -e .
 ```
 
 Add the plotting extra if you want `--show`:
 
 ```console
-pip install "hist2mri[viz]"
+pip install -e ".[viz]"
 ```
 
 ### From the shell
@@ -83,11 +85,6 @@ Five MATLAB files were merged into `gimmeh2m.py`, each as its own function.
 | `SeparateStains.m` | `_separate_stains_h()` |
 | `normalizeImage.m` | `_normalize_image()` |
 
-Plus helpers reimplementing MATLAB Image Processing Toolbox built-ins that have
-no faithful python equivalent: `_graythresh`, `_imbinarize`, `_stretchlim`,
-`_imadjust`, `_rgb_hue_sat`, `_imresize`. Most of the porting difficulty lived
-in those, not in the lab's own code.
-
 ## Fidelity
 
 Validated against MATLAB on 4000x4000 crops from five slides:
@@ -117,8 +114,8 @@ on full-resolution slides where this does not.
 Clone the repository and install [Hatch](https://hatch.pypa.io/latest/install/):
 
 ```console
-git clone https://github.com/LavLabInfrastructure/hist2mri.git
-cd hist2mri
+git clone https://github.com/DONNYMURPH/matlab-conversions.git
+cd matlab-conversions
 pip install hatch
 ```
 

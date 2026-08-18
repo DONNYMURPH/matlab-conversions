@@ -37,29 +37,22 @@ produces the same numbers; it just runs in Python and needs far less memory.
 
 You need Python 3.9 or newer. Check with `python --version`.
 
-### Option A — you just want to run it
-
 ```bash
-pip install hist2mri
-```
-
-### Option B — from the repository
-
-```bash
-git clone https://github.com/LavLabInfrastructure/hist2mri.git
-cd hist2mri
+git clone https://github.com/DONNYMURPH/matlab-conversions.git
+cd matlab-conversions
 pip install -e .
 ```
 
-### If pip complains about permissions
+The repository is called `matlab-conversions`; the package it installs is
+called `hist2mri`. That is what you import and what the command is named.
 
-You're probably on a shared machine where you can't write to the system
-Python. Make your own environment:
+### If pip complains about permissions
 
 ```bash
 python -m venv ~/h2m-venv
 source ~/h2m-venv/bin/activate
-pip install hist2mri
+cd /path/to/matlab-conversions
+pip install -e .
 ```
 
 You'll need to run that `source` line once in every new terminal. When it's
@@ -89,11 +82,11 @@ That's it. Two things: the slide, and where to put the results.
 **Tip for long paths:** in most terminals you can drag a file from the file
 browser into the terminal window and it pastes the full path for you.
 
-### A worked example
+### An example
 
 ```bash
 mkdir -p ~/h2m_results
-hist2mri run /Volumes/Siren/Brain_data/1.PatientDirectory/113/Histology/Processed/S14_Large/HE/large_recon_10_nowhite_HE.tiff --outdir ~/h2m_results -v
+hist2mri run /BIGPIC.tiff --outdir ~/h2m_results -v
 ```
 
 You'll see it work through the stages:
@@ -131,7 +124,7 @@ wrote /home/you/h2m_results/h2m.mat  (grid 562 x 424)
 | `-q` | Silent except the final line. |
 | `--small` | Halve the image before processing. **Changes the meaning of the output** — see below. |
 | `--use-pre-segs` | Skip segmentation and reuse mask files already in `--outdir`. |
-| `--show` | Pop up a window with the six maps. Needs `pip install "hist2mri[viz]"` and a display. |
+| `--show` | Pop up a window with the six maps. Needs `pip install -e ".[viz]"` and a display. |
 | `--version` | Print the version. |
 | `--help` | List all options. |
 
@@ -169,7 +162,7 @@ full slide resolution. Delete them if you only need `h2m.mat`.
 
 ### Reading the results in MATLAB
 
-Exactly as before. Nothing changed about the format.
+Exactly as before.
 
 ```matlab
 load('h2m.mat')
@@ -191,8 +184,6 @@ cell_den = m.cell_den
 nuclei = cell_den[:, :, 2]        # note: Python counts from 0
 cell_counts = cell_den[:, :, 4]
 ```
-
-Careful with the index shift — MATLAB layer 3 is Python index 2.
 
 ### Using it directly in Python
 
@@ -219,8 +210,6 @@ logging.basicConfig(level=logging.INFO)
 Depends mostly on slide size. For reference, a 594-megapixel slide
 (21184 × 28054):
 
-- **Loading:** a few minutes if the slide is on a network drive. This is
-  usually the slowest part, and nothing prints while it happens.
 - **Processing:** a few minutes.
 - **Peak memory:** about 11.5 GB.
 
@@ -239,11 +228,6 @@ memory as it goes.
 
 **"command not found: hist2mri"**
 The virtual environment isn't active. Run `source ~/h2m-venv/bin/activate`.
-
-**"No such file or directory"**
-Check the slide path. A common mistake is putting `~/` in front of an absolute
-path — `~/Volumes/...` means `/home/you/Volumes/...`, which isn't the same as
-`/Volumes/...`.
 
 **Killed, or the terminal returns with no message**
 Out of memory. Check available RAM with `free -g` (Linux). Process a crop or
@@ -285,36 +269,9 @@ features that are sparse or clustered — vessels in particular.
 
 ---
 
-## Things worth knowing about the results
-
-These are properties of the original MATLAB pipeline, faithfully reproduced.
-Worth understanding before drawing conclusions.
-
-**The nuclei threshold is relative to each slide.** Nuclei are found by
-measuring hematoxylin stain, then rescaling to that slide's own range and
-cutting at 0.7. So the same real stain intensity can land on either side of
-the cut on two different slides, depending on how each one was stained. Nuclei
-counts are more comparable *within* a slide than *between* slides.
-
-**Nuclei on tile boundaries are counted twice.** Layer 5 counts blobs within
-each tile independently, so a nucleus straddling an edge is counted in both
-tiles. Total counts are therefore slightly inflated.
-
-**The black-edge removal often does nothing.** It only catches pixels that are
-*exactly* black. On one production slide it fixed 828k pixels and missed 1.44M
-near-black ones.
-
-**The vessel layer detects very little.** Across five slides tested, vessel
-coverage ran between 0.0001% and 0.001%. The rule looks for strongly saturated
-red, i.e. actual blood — vessel lumens without blood in them read as empty
-space instead. Treat near-zero vessel numbers as expected rather than as an
-error, and check with Pete or Sam before using that layer for anything.
-
----
-
 ## Getting help
 
 - `hist2mri --help` lists every option
-- Issues: https://github.com/LavLabInfrastructure/hist2mri/issues
+- Issues: https://github.com/DONNYMURPH/matlab-conversions/issues
 - The repository README covers how the port maps onto the original MATLAB
   files, and how it was validated

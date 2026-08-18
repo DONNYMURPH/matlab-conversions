@@ -1,7 +1,7 @@
 # hist2mri
 
 Histology to MRI tissue density mapping. A python port of the lab's MATLAB
-gimmeh2m.
+gimmeh2m file.
 
 ## What it does
 
@@ -12,6 +12,7 @@ two: it reduces the huge microscope image to six coarse density maps at 1/50
 scale, so you can ask what the tissue actually looks like inside one MRI voxel.
 
 **Input:** one slide image.
+
 **Output:** `h2m.mat` holding a thumbnail plus a `rows x cols x 6` stack, where
 every value summarises one 50x50 pixel tile of the slide.
 
@@ -24,16 +25,31 @@ every value summarises one 50x50 pixel tile of the slide.
 | 5 | Cell Count | separate nuclei (count, not area) |
 | 6 | Smoothed Cell Count | layer 5, gaussian smoothed |
 
+Layers 1-4 sum to 2500 per tile (50 x 50), so they read as proportions. Layer 5
+is the only one counting objects rather than pixels -- two tiles can have
+identical nuclei area but very different cell counts.
+
+The output format is unchanged from the MATLAB version, so anything downstream
+that already reads `h2m.mat` keeps working.
+
 ## Install
 
 ```console
-pip install hist2mri
+git clone https://github.com/DONNYMURPH/matlab-conversions.git
+cd matlab-conversions
+pip install -e .
 ```
 
 Add the plotting extra if you want `--show`:
 
 ```console
-pip install "hist2mri[viz]"
+pip install -e ".[viz]"
+```
+
+```console
+python -m venv ~/h2m-venv
+source ~/h2m-venv/bin/activate
+pip install -e .
 ```
 
 ## Use
@@ -42,9 +58,15 @@ From the shell:
 
 ```console
 hist2mri run slide.tif --outdir results/
-hist2mri run slide.tif --outdir results/ -vv     # intermediate statistics
+hist2mri run slide.tif --outdir results/ -v      # stage messages
+hist2mri run slide.tif --outdir results/ -vv     # plus thresholds, coverages, peak memory
 hist2mri run slide.tif --outdir results/ --show  # needs [viz]
 ```
+
+**Never point `--outdir` at a folder containing slide data.** The pipeline
+writes `h2m.mat`, `ecf.mat`, `vessel.mat`, `nuclei.mat` and `pink.mat` -- the
+same names the MATLAB version uses -- so it would overwrite whatever is
+already there.
 
 From python:
 
@@ -65,6 +87,16 @@ logging.basicConfig(level=logging.INFO)   # stage messages
 logging.basicConfig(level=logging.DEBUG)  # plus thresholds and coverages
 ```
 
+Reading the result back in MATLAB works exactly as before:
+
+```matlab
+load('h2m.mat')
+imagesc(out.cell_den(:,:,3))
+```
+
+See [`docs/usage.md`](docs/usage.md) for a fuller guide aimed at people who
+do not use Python.
+
 ## Which MATLAB file is where
 
 Five MATLAB files were merged into `gimmeh2m.py`, each as its own function.
@@ -77,21 +109,19 @@ Five MATLAB files were merged into `gimmeh2m.py`, each as its own function.
 | `SeparateStains.m` | `_separate_stains_h()` |
 | `normalizeImage.m` | `_normalize_image()` |
 
-Plus a handful of helpers that reimplement MATLAB Image Processing Toolbox
-built-ins with no faithful python equivalent: `_graythresh`, `_imbinarize`,
-`_stretchlim`, `_imadjust`, `_rgb_hue_sat`, `_imresize`.
-
 ## Fidelity
 
-Validated against MATLAB on 4000x4000 crops from five slides:
+Validated against fresh MATLAB runs on 4000x4000 crops from five slides,
+compared at full pixel resolution:
 
 | Layer | Result |
 |-------|--------|
-| ECF | 0 of 16,000,000 pixels differ |
-| Nuclei | 0 of 16,000,000 pixels differ |
+| ECF | 0 of 16,000,000 pixels differ, on all five slides |
+| Nuclei | 0 of 16,000,000 pixels differ, on all five slides |
 | Cell count | identical, max block difference 0 |
 | Smoothed count | agrees to ~1e-14 (float64 rounding) |
-| Vessel | 3 pixels on one slide |
+| Pink | identical on four of five slides |
+| Vessel | identical on four of five; 3 pixels differ on the fifth |
 
 Those 3 pixels all have saturation of exactly 0.6, where the vessel rule tests
 `> 0.6` and the last bit of a float64 division rounds differently in MATLAB
@@ -100,12 +130,21 @@ correct, and all three are near-black background rather than real vessels.
 
 ## Memory
 
-The deconvolution is chunked and only the hematoxylin channel is computed, so a
-594-megapixel slide runs in roughly 16 GB. The MATLAB original builds the whole
-float64 array at once and needs about 40 GB, which is why it runs out of memory
-on full-resolution slides where this does not.
+Measured on a 594-megapixel slide (21184 x 28054): **11.5 GB peak**, with the
+whole deconvolution accounting for only about 2 GB of that. Loading the image
+dominates.
+
+Rough rule: allow about **20 bytes of RAM per pixel** of slide.
+
+The hue and saturation computation, the Otsu binarization and the deconvolution
+are all chunked, and the normalize, complement and adjust steps work in place.
+A direct translation of the MATLAB needs roughly 40 GB for the same slide,
+which is why the original runs out of memory on full-resolution slides where
+this does not.
 
 ## Development
+
+With [hatch](https://hatch.pypa.io/):
 
 ```console
 pip install hatch
@@ -117,3 +156,24 @@ hatch run types:check    # mypy
 hatch run docs:serve-docs
 hatch build
 ```
+
+If hatch cannot create its environments -- which happens on shared machines
+where the system Python is read-only -- use a plain virtualenv and call the
+tools directly:
+
+```console
+python -m venv ~/h2m-venv
+source ~/h2m-venv/bin/activate
+pip install -e . ruff pytest
+
+ruff check src tests
+ruff format src tests --check
+python -m pytest tests -q
+```
+
+Those are the same checks CI runs.
+
+### Testing notes
+
+The suite covers the MATLAB built-in reimplementations most heavily, since
+that is where every real discrepancy during the port turned out to be.
