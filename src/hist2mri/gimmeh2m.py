@@ -76,15 +76,7 @@ Image.MAX_IMAGE_PIXELS = None
 BLOCK = 50  # blockproc block size
 SCALE = 1.0 / BLOCK  # the 0.02 in the MATLAB source
 
-# The old DEBUG flag and _dbg() helper are gone. What used to print only
-# under --debug is now logger.debug(); the stage announcements are
-# logger.info(). Switch them on with `hist2mri run -vv`, or in python with
-#     import logging; logging.basicConfig(level=logging.DEBUG)
 
-
-# The following are some matlab methods that do not have an exact 1-to-1 that
-# we need to use. Python has a method that could do this but does not have the
-# same tie breaking as matlab, and uses different histogram bins.
 def _graythresh(ch):
     """MATLAB graythresh: Otsu's method on a 256-bin histogram.
 
@@ -265,17 +257,8 @@ def _normalize_image(ch):
     """
     lo, hi = ch.min(), ch.max()
     logger.debug(f"raw hematoxylin: min={lo:.6f} max={hi:.6f} range={hi - lo:.6f}")
-    # np.percentile is deliberately not called here: it copies and
-    # partitions the whole array, another 4.75 GB on a full slide, and it
-    # ran twice -- which made -vv the thing that pushed a big slide over.
     if hi <= lo:
-        # MATLAB would produce NaN here (0/0). Degenerate input.
         return np.zeros_like(ch)
-
-    # In place. The arithmetic is identical to
-    #     ch = (ch - lo) / (hi - lo); ch = 1.0 - ch
-    # but without allocating a fresh full size array at each step, which on a
-    # full slide is 4.75 GB apiece.
     ch -= lo
     ch /= hi - lo
     np.subtract(1.0, ch, out=ch)
@@ -311,15 +294,9 @@ def _separate_stains_h(im, chunk_rows=2048):
 
 
 # The method version of gimmeSegs.m file.
-
-
 def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
     """Segment an RGB slide into ecf / vessel / nuclei / pink uint8 masks."""
     image = np.array(image, dtype=np.uint8, copy=True)
-    # MATLAB does `[sx,sy] = size(image); sy = sy/3;` here. That is only needed
-    # because matlab's size() folds the 3 colour channels into the last output
-    # when you ask for fewer outputs than the array has dimensions. numpy's
-    # .shape never does that, so there is nothing to undo and nothing to store.
 
     logger.info("Chopping off black edges")
     black = (image[..., 0] == 0) & (image[..., 1] == 0) & (image[..., 2] == 0)
@@ -351,9 +328,6 @@ def gimme_segs(image, show_me=False, save_segs=False, outdir="."):
 
     logger.info("3. Segmenting Nuclei")
     stain_h = _separate_stains_h(image)
-    # MATLAB's imcomplement, in place. Writing `nuc3 = 1.0 - stain_h` would
-    # allocate a second full size float64 array (4.75 GB on a full slide)
-    # purely to hold a value we immediately threshold away.
     np.subtract(1.0, stain_h, out=stain_h)
     nuc3 = (stain_h >= 0.7).astype(np.uint8)
     logger.debug(f"nuclei coverage = {float(nuc3.mean()):.4%}")
@@ -403,9 +377,6 @@ def _block_sum(mask, bs=BLOCK):
     """
     h, w = mask.shape
     gh, gw = _grid_shape(h, w, bs)
-    # uint8 pad buffer, not int64. The mask is 0/1, so only the accumulator
-    # needs to be wide -- and at full slide size an int64 buffer here is
-    # 4.77 GB, allocated four times over.
     padded = np.zeros((gh * bs, gw * bs), dtype=np.uint8)
     padded[:h, :w] = mask
     return (
@@ -417,10 +388,6 @@ def _block_sum(mask, bs=BLOCK):
 
 def _block_count(mask, bs=BLOCK):
     """blockproc(mask, [50 50], countify).
-
-    MATLAB QUIRK: cellcount runs per block, so a nucleus straddling a block
-    boundary is counted once in each block. Zero-padding creates no new
-    components, so partial edge blocks behave identically.
     """
     h, w = mask.shape
     gh, gw = _grid_shape(h, w, bs)
