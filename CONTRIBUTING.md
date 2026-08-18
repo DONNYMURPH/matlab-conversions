@@ -7,7 +7,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 1. **Clone the repository:**
 
    ```console
-   git clone https://github.com/LavLabInfrastructure/hist2mri.git
+   git clone https://github.com/DONNYMURPH/matlab-conversions.git
    cd hist2mri
    ```
 
